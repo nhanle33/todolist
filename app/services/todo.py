@@ -1,0 +1,86 @@
+from typing import List, Optional
+from sqlalchemy.orm import Session
+from app.repositories.database import ToDoRepository
+from app.schemas import ToDoCreate, ToDoUpdate, ToDoPartialUpdate, ToDoResponse, PaginatedToDoResponse
+
+
+class ToDoService:
+    """Service for todo business logic"""
+
+    def __init__(self, db: Session):
+        self.repository = ToDoRepository(db)
+
+    def create_todo(self, todo_create: ToDoCreate) -> ToDoResponse:
+        """Create a new todo"""
+        todo = self.repository.create(
+            title=todo_create.title,
+            description=todo_create.description,
+            is_done=todo_create.is_done
+        )
+        return ToDoResponse.from_orm(todo)
+
+    def get_todo(self, todo_id: int) -> Optional[ToDoResponse]:
+        """Get todo by id"""
+        todo = self.repository.get_by_id(todo_id)
+        if not todo:
+            return None
+        return ToDoResponse.from_orm(todo)
+
+    def list_todos(
+        self,
+        is_done: Optional[bool] = None,
+        q: Optional[str] = None,
+        sort: str = "created_at",
+        limit: int = 10,
+        offset: int = 0,
+    ) -> PaginatedToDoResponse:
+        """List todos with filtering, searching, sorting and pagination"""
+        todos, total = self.repository.get_all(
+            is_done=is_done,
+            q=q,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+
+        return PaginatedToDoResponse(
+            items=[ToDoResponse.from_orm(t) for t in todos],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    def update_todo(self, todo_id: int, todo_update: ToDoUpdate) -> Optional[ToDoResponse]:
+        """Update a todo (PUT - full update)"""
+        todo = self.repository.update(
+            todo_id=todo_id,
+            title=todo_update.title,
+            description=todo_update.description,
+            is_done=todo_update.is_done,
+        )
+        if not todo:
+            return None
+        return ToDoResponse.from_orm(todo)
+
+    def partial_update_todo(self, todo_id: int, todo_update: ToDoPartialUpdate) -> Optional[ToDoResponse]:
+        """Partial update a todo (PATCH)"""
+        todo = self.repository.update(
+            todo_id=todo_id,
+            title=todo_update.title,
+            description=todo_update.description,
+            is_done=todo_update.is_done,
+        )
+        if not todo:
+            return None
+        return ToDoResponse.from_orm(todo)
+
+    def mark_complete(self, todo_id: int) -> Optional[ToDoResponse]:
+        """Mark a todo as complete"""
+        todo = self.repository.update(todo_id=todo_id, is_done=True)
+        if not todo:
+            return None
+        return ToDoResponse.from_orm(todo)
+
+    def delete_todo(self, todo_id: int) -> bool:
+        """Delete a todo"""
+        return self.repository.delete(todo_id)

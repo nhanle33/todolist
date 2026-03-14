@@ -39,3 +39,6 @@ MANIFEST
 .env.local
 *.db
 *.sqlite
+todos.db
+alembic.ini
+alembic/
