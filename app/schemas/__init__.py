@@ -5,5 +5,23 @@ from app.schemas.todo import (
     ToDoResponse,
     PaginatedToDoResponse,
 )
+from app.schemas.user import (
+    UserRegister,
+    UserLogin,
+    UserResponse,
+    TokenResponse,
+    CurrentUser,
+)
 
-__all__ = ["ToDoCreate", "ToDoUpdate", "ToDoPartialUpdate", "ToDoResponse", "PaginatedToDoResponse"]
+__all__ = [
+    "ToDoCreate",
+    "ToDoUpdate",
+    "ToDoPartialUpdate",
+    "ToDoResponse",
+    "PaginatedToDoResponse",
+    "UserRegister",
+    "UserLogin",
+    "UserResponse",
+    "TokenResponse",
+    "CurrentUser",
+]

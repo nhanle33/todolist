@@ -10,32 +10,35 @@ class ToDoService:
     def __init__(self, db: Session):
         self.repository = ToDoRepository(db)
 
-    def create_todo(self, todo_create: ToDoCreate) -> ToDoResponse:
+    def create_todo(self, owner_id: int, todo_create: ToDoCreate) -> ToDoResponse:
         """Create a new todo"""
         todo = self.repository.create(
+            owner_id=owner_id,
             title=todo_create.title,
             description=todo_create.description,
             is_done=todo_create.is_done
         )
         return ToDoResponse.from_orm(todo)
 
-    def get_todo(self, todo_id: int) -> Optional[ToDoResponse]:
-        """Get todo by id"""
-        todo = self.repository.get_by_id(todo_id)
+    def get_todo(self, todo_id: int, owner_id: int) -> Optional[ToDoResponse]:
+        """Get todo by id (must belong to owner)"""
+        todo = self.repository.get_by_id(todo_id, owner_id)
         if not todo:
             return None
         return ToDoResponse.from_orm(todo)
 
     def list_todos(
         self,
+        owner_id: int,
         is_done: Optional[bool] = None,
         q: Optional[str] = None,
         sort: str = "created_at",
         limit: int = 10,
         offset: int = 0,
     ) -> PaginatedToDoResponse:
-        """List todos with filtering, searching, sorting and pagination"""
+        """List todos owned by user with filtering, searching, sorting and pagination"""
         todos, total = self.repository.get_all(
+            owner_id=owner_id,
             is_done=is_done,
             q=q,
             sort=sort,
@@ -50,10 +53,11 @@ class ToDoService:
             offset=offset,
         )
 
-    def update_todo(self, todo_id: int, todo_update: ToDoUpdate) -> Optional[ToDoResponse]:
+    def update_todo(self, todo_id: int, owner_id: int, todo_update: ToDoUpdate) -> Optional[ToDoResponse]:
         """Update a todo (PUT - full update)"""
         todo = self.repository.update(
             todo_id=todo_id,
+            owner_id=owner_id,
             title=todo_update.title,
             description=todo_update.description,
             is_done=todo_update.is_done,
@@ -62,10 +66,11 @@ class ToDoService:
             return None
         return ToDoResponse.from_orm(todo)
 
-    def partial_update_todo(self, todo_id: int, todo_update: ToDoPartialUpdate) -> Optional[ToDoResponse]:
+    def partial_update_todo(self, todo_id: int, owner_id: int, todo_update: ToDoPartialUpdate) -> Optional[ToDoResponse]:
         """Partial update a todo (PATCH)"""
         todo = self.repository.update(
             todo_id=todo_id,
+            owner_id=owner_id,
             title=todo_update.title,
             description=todo_update.description,
             is_done=todo_update.is_done,
@@ -74,13 +79,13 @@ class ToDoService:
             return None
         return ToDoResponse.from_orm(todo)
 
-    def mark_complete(self, todo_id: int) -> Optional[ToDoResponse]:
+    def mark_complete(self, todo_id: int, owner_id: int) -> Optional[ToDoResponse]:
         """Mark a todo as complete"""
-        todo = self.repository.update(todo_id=todo_id, is_done=True)
+        todo = self.repository.update(todo_id=todo_id, owner_id=owner_id, is_done=True)
         if not todo:
             return None
         return ToDoResponse.from_orm(todo)
 
-    def delete_todo(self, todo_id: int) -> bool:
-        """Delete a todo"""
-        return self.repository.delete(todo_id)
+    def delete_todo(self, todo_id: int, owner_id: int) -> bool:
+        """Delete a todo (must belong to owner)"""
+        return self.repository.delete(todo_id, owner_id)

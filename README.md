@@ -198,6 +198,330 @@ class ToDo(Base):
 - SQL `OFFSET` và `LIMIT`
 - Quicker for large datasets
 
+**Status:** ✅ Hoàn thành
+
+---
+
+## Cấp 5 - User Authentication & Authorization (Hoàn thành ✅)
+
+### Yêu cầu
+- User model: email (unique), password (hashed), is_active
+- JWT token authentication (Bearer token)
+- Password hashing with bcrypt
+- Endpoints: register, login, /me
+- User isolation: User A không thể xem/sửa/xóa todos của User B
+- HTTPBearer security scheme
+
+### User Model Database
+
+```python
+# app/db/models.py
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+    
+    # Relationship
+    todos = relationship("ToDo", back_populates="owner")
+```
+
+### Todo-User Relationship
+
+```python
+# app/db/models.py
+class ToDo(Base):
+    __tablename__ = "todos"
+    
+    id = Column(Integer, primary_key=True)
+    title = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    is_done = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    
+    # ✨ NEW: User-Todo relationship
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    owner = relationship("User", back_populates="todos")
+```
+
+### Authentication Architecture
+
+```
+Security Layer (app/core/security.py)
+├── hash_password(password) → bcrypt hash
+├── verify_password(plain, hashed) → bool
+├── create_access_token(data) → JWT string (30 min expiry)
+└── decode_access_token(token) → dict or None
+
+Repository Layer (app/repositories/)
+├── user.py: UserRepository
+│   ├── create(email, password)
+│   ├── get_by_email(email)
+│   ├── get_by_id(user_id)
+│   └── authenticate(email, password)
+└── database.py: ToDoRepository (owner-aware)
+    ├── create(owner_id, todo_data)
+    ├── get_by_id(todo_id, owner_id)
+    ├── get_all(owner_id, filters...)
+    ├── update(todo_id, owner_id, data)
+    └── delete(todo_id, owner_id)
+
+Service Layer (app/services/)
+├── auth.py: AuthService
+│   ├── register(UserRegister) → UserResponse
+│   ├── login(UserLogin) → TokenResponse
+│   └── get_current_user_by_id(user_id) → User
+└── todo.py: ToDoService (owner-aware)
+    ├── create_todo(owner_id, data)
+    ├── get_todo(todo_id, owner_id)
+    ├── list_todos(owner_id, filters...)
+    └── ...
+
+Router Layer (app/routers/)
+├── auth.py: Authentication endpoints
+│   ├── POST /auth/register
+│   ├── POST /auth/login
+│   └── GET /auth/me
+└── todo.py: Todo endpoints with HTTPBearer
+    └── All endpoints require JWT token + get_current_user dependency
+```
+
+### Authentication Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | /api/v1/auth/register | ❌ | Register new user |
+| POST | /api/v1/auth/login | ❌ | Login & get JWT token |
+| GET | /api/v1/auth/me | ✅ Bearer token | Get current user info |
+
+### Todo Endpoints (All Require Authentication)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | /api/v1/todos | ✅ Bearer token | Create todo for current user |
+| GET | /api/v1/todos | ✅ Bearer token | List todos (only current user's) |
+| GET | /api/v1/todos/{id} | ✅ Bearer token | Get todo (only if user owns it) |
+| PUT | /api/v1/todos/{id} | ✅ Bearer token | Update todo (only if user owns it) |
+| PATCH | /api/v1/todos/{id} | ✅ Bearer token | Partially update (only if owner) |
+| POST | /api/v1/todos/{id}/complete | ✅ Bearer token | Mark done (only if owner) |
+| DELETE | /api/v1/todos/{id} | ✅ Bearer token | Delete todo (only if owner) |
+
+### User Schemas
+
+```python
+# Request
+class UserRegister(BaseModel):
+    email: str
+    password: str  # 6-72 chars (bcrypt limit)
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+# Response
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    is_active: bool
+    created_at: datetime
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+class CurrentUser(BaseModel):
+    id: int
+    email: str
+    is_active: bool
+    created_at: datetime
+```
+
+### Usage Examples
+
+**1. Register a new user**
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user1@example.com",
+    "password": "securepass123"
+  }'
+
+# Response
+{
+  "id": 1,
+  "email": "user1@example.com",
+  "is_active": true,
+  "created_at": "2026-03-17T15:54:19.579759"
+}
+```
+
+**2. Login to get JWT token**
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user1@example.com",
+    "password": "securepass123"
+  }'
+
+# Response
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzzz....",
+  "token_type": "bearer"
+}
+```
+
+**3. Get current user (requires token)**
+```bash
+TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."
+
+curl -X GET http://localhost:8000/api/v1/auth/me \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response
+{
+  "id": 1,
+  "email": "user1@example.com",
+  "is_active": true,
+  "created_at": "2026-03-17T15:54:19.579759"
+}
+```
+
+**4. Create a todo (requires token)**
+```bash
+TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."
+
+curl -X POST http://localhost:8000/api/v1/todos \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Learn JWT Authentication",
+    "description": "Understand how JWT works"
+  }'
+
+# Response
+{
+  "id": 1,
+  "title": "Learn JWT Authentication",
+  "description": "Understand how JWT works",
+  "is_done": false,
+  "created_at": "2026-03-17T15:54:36.014565",
+  "updated_at": "2026-03-17T15:54:36.014569"
+}
+```
+
+**5. List todos (only user's todos, requires token)**
+```bash
+TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."
+
+curl -X GET "http://localhost:8000/api/v1/todos?is_done=false&sort=-created_at" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response - only shows current user's todos
+{
+  "items": [
+    {
+      "id": 1,
+      "title": "Learn JWT Authentication",
+      "description": "Understand how JWT works",
+      "is_done": false,
+      "created_at": "2026-03-17T15:54:36.014565",
+      "updated_at": "2026-03-17T15:54:36.014569"
+    }
+  ],
+  "total": 1,
+  "limit": 10,
+  "offset": 0
+}
+```
+
+### Security Features
+
+✅ **Password Security**
+- Bcrypt hashing (configured with 12 rounds)
+- Password truncated to 72 bytes (bcrypt limit)
+- Never store plain passwords
+
+✅ **JWT Token Security**
+- HS256 algorithm
+- 30-minute expiration
+- Token contains user ID (sub claim)
+- Verified on every authenticated request
+
+✅ **User Isolation**
+- Repository layer enforces owner_id filtering
+- User A cannot see, edit, or delete User B's todos
+- GET /api/v1/todos/{id} returns 404 if not owner
+- Database foreign key relationship enforces referential integrity
+
+✅ **HTTPBearer Scheme**
+- FastAPI built-in HTTPBearer security scheme
+- Automatically extracts token from Authorization header
+- Format: `Authorization: Bearer <token>`
+
+### Project Structure
+
+```
+app/
+├── __init__.py
+├── core/
+│   ├── __init__.py
+│   ├── config.py              # Pydantic settings
+│   └── security.py            # Password & JWT utilities
+├── db/
+│   ├── __init__.py
+│   ├── database.py            # Engine, session, get_db()
+│   └── models.py              # User & ToDo ORM models
+├── repositories/
+│   ├── __init__.py
+│   ├── user.py                # UserRepository (NEW)
+│   └── database.py            # ToDoRepository (updated for owner_id)
+├── services/
+│   ├── __init__.py
+│   ├── todo.py                # ToDoService (updated for owner_id)
+│   └── auth.py                # AuthService (NEW)
+├── routers/
+│   ├── __init__.py
+│   ├── todo.py                # Todo endpoints (updated with auth)
+│   └── auth.py                # Auth endpoints (NEW)
+└── schemas/
+    ├── __init__.py
+    ├── todo.py                # Todo models
+    └── user.py                # User models (NEW)
+
+main.py                         # FastAPI app + auth router
+requirements.txt                # Dependencies + auth packages
+todos.db                        # SQLite database (auto-created)
+```
+
+### Dependencies Added
+
+```
+passlib[bcrypt]==1.7.4         # Password hashing
+python-jose[cryptography]==3.3.0  # JWT token handling
+python-multipart==0.0.6        # Form data parsing (for HTTPBearer)
+```
+
+**Status:** ✅ Hoàn thành
+
+### Testing Summary
+
+✅ User 1 registers successfully
+✅ User 1 logs in and gets JWT token
+✅ User 1 creates todo (id=1)
+✅ User 2 registers and logs in
+✅ User 2 lists todos (empty - isolation working!)
+✅ User 2 creates todo (id=2)
+✅ User 1 lists todos (only sees id=1 - isolation confirmed!)
+✅ /me endpoint returns correct user info
+✅ All authenticated endpoints require valid Bearer token
+
+
 ✅ **Full-Text Search**
 - Tìm kiếm trong title và description
 - Case-insensitive search

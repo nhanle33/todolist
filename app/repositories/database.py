@@ -11,28 +11,32 @@ class ToDoRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def create(self, title: str, description: Optional[str] = None, is_done: bool = False) -> ToDo:
+    def create(self, owner_id: int, title: str, description: Optional[str] = None, is_done: bool = False) -> ToDo:
         """Create a new todo"""
-        todo = ToDo(title=title, description=description, is_done=is_done)
+        todo = ToDo(owner_id=owner_id, title=title, description=description, is_done=is_done)
         self.db.add(todo)
         self.db.commit()
         self.db.refresh(todo)
         return todo
 
-    def get_by_id(self, todo_id: int) -> Optional[ToDo]:
-        """Get todo by id"""
-        return self.db.query(ToDo).filter(ToDo.id == todo_id).first()
+    def get_by_id(self, todo_id: int, owner_id: int) -> Optional[ToDo]:
+        """Get todo by id (must belong to owner)"""
+        return self.db.query(ToDo).filter(
+            ToDo.id == todo_id,
+            ToDo.owner_id == owner_id
+        ).first()
 
     def get_all(
         self,
+        owner_id: int,
         is_done: Optional[bool] = None,
         q: Optional[str] = None,
         sort: str = "created_at",
         limit: int = 10,
         offset: int = 0,
     ) -> tuple[List[ToDo], int]:
-        """Get all todos with filtering, searching, sorting and pagination"""
-        query = self.db.query(ToDo)
+        """Get all todos for a user with filtering, searching, sorting and pagination"""
+        query = self.db.query(ToDo).filter(ToDo.owner_id == owner_id)
 
         # Filter by is_done
         if is_done is not None:
@@ -77,12 +81,13 @@ class ToDoRepository:
     def update(
         self,
         todo_id: int,
+        owner_id: int,
         title: Optional[str] = None,
         description: Optional[str] = None,
         is_done: Optional[bool] = None,
     ) -> Optional[ToDo]:
-        """Update a todo"""
-        todo = self.get_by_id(todo_id)
+        """Update a todo (must belong to owner)"""
+        todo = self.get_by_id(todo_id, owner_id)
         if not todo:
             return None
 
@@ -98,9 +103,9 @@ class ToDoRepository:
         self.db.refresh(todo)
         return todo
 
-    def delete(self, todo_id: int) -> bool:
-        """Delete a todo"""
-        todo = self.get_by_id(todo_id)
+    def delete(self, todo_id: int, owner_id: int) -> bool:
+        """Delete a todo (must belong to owner)"""
+        todo = self.get_by_id(todo_id, owner_id)
         if not todo:
             return False
 
