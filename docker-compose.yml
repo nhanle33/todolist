@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  # FastAPI application
+  app:
+    build: .
+    container_name: todolist-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./main.py:/app/main.py
+      - ./todos.db:/app/todos.db
+    environment:
+      - DEBUG=True
+      - DATABASE_URL=sqlite:///./todos.db
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - todolist-network
+
+  # Optional: PostgreSQL (uncomment if you want to use PostgreSQL instead of SQLite)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: todolist-db
+  #   environment:
+  #     POSTGRES_USER: todouser
+  #     POSTGRES_PASSWORD: todopass123
+  #     POSTGRES_DB: todolist_db
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - todolist-network
+
+networks:
+  todolist-network:
+    driver: bridge
+
+# volumes:
+#   postgres_data:
+#     driver: local
