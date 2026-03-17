@@ -40,10 +40,11 @@ class ToDoRepository:
         return todo
 
     def get_by_id(self, todo_id: int, owner_id: int) -> Optional[ToDo]:
-        """Get todo by id (must belong to owner)"""
+        """Get todo by id (must belong to owner, not deleted)"""
         return self.db.query(ToDo).filter(
             ToDo.id == todo_id,
-            ToDo.owner_id == owner_id
+            ToDo.owner_id == owner_id,
+            ToDo.deleted_at.is_(None)  # ✨ CAP 8: exclude deleted
         ).first()
 
     def get_all(
@@ -56,7 +57,10 @@ class ToDoRepository:
         offset: int = 0,
     ) -> tuple[List[ToDo], int]:
         """Get all todos for a user with filtering, searching, sorting and pagination"""
-        query = self.db.query(ToDo).filter(ToDo.owner_id == owner_id)
+        query = self.db.query(ToDo).filter(
+            ToDo.owner_id == owner_id,
+            ToDo.deleted_at.is_(None)  # ✨ CAP 8: exclude deleted
+        )
 
         # Filter by is_done
         if is_done is not None:
@@ -133,22 +137,51 @@ class ToDoRepository:
         return todo
 
     def delete(self, todo_id: int, owner_id: int) -> bool:
-        """Delete a todo (must belong to owner)"""
+        """Soft delete a todo (must belong to owner)"""
         todo = self.get_by_id(todo_id, owner_id)
         if not todo:
             return False
 
-        self.db.delete(todo)
+        todo.deleted_at = datetime.now()  # ✨ CAP 8: soft delete
         self.db.commit()
         return True
 
+    def restore(self, todo_id: int, owner_id: int) -> Optional[ToDo]:
+        """Restore a deleted todo"""
+        # Get deleted todo (allow deleted_at not null)
+        todo = self.db.query(ToDo).filter(
+            ToDo.id == todo_id,
+            ToDo.owner_id == owner_id,
+            ToDo.deleted_at.isnot(None)  # ✨ CAP 8: only deleted todos
+        ).first()
+        
+        if not todo:
+            return None
+        
+        todo.deleted_at = None  # ✨ CAP 8: restore
+        self.db.commit()
+        self.db.refresh(todo)
+        return todo
+
+    def get_deleted(self, owner_id: int, limit: int = 10, offset: int = 0) -> tuple[List[ToDo], int]:
+        """Get deleted todos for a user"""
+        query = self.db.query(ToDo).filter(
+            ToDo.owner_id == owner_id,
+            ToDo.deleted_at.isnot(None)  # ✨ CAP 8: only deleted
+        ).order_by(desc(ToDo.deleted_at))
+        
+        total = query.count()
+        todos = query.offset(offset).limit(limit).all()
+        return todos, total
+
     def get_overdue(self, owner_id: int, limit: int = 10, offset: int = 0) -> tuple[List[ToDo], int]:
-        """Get overdue todos (due_date < today and not done)"""
+        """Get overdue todos (due_date < today and not done, not deleted)"""
         today = date.today()
         query = self.db.query(ToDo).filter(
             ToDo.owner_id == owner_id,
             ToDo.due_date < today,
-            ToDo.is_done == False
+            ToDo.is_done == False,
+            ToDo.deleted_at.is_(None)  # ✨ CAP 8: exclude deleted
         ).order_by(ToDo.due_date)
         
         total = query.count()
@@ -156,12 +189,13 @@ class ToDoRepository:
         return todos, total
 
     def get_today(self, owner_id: int, limit: int = 10, offset: int = 0) -> tuple[List[ToDo], int]:
-        """Get today's todos (due_date = today and not done)"""
+        """Get today's todos (due_date = today and not done, not deleted)"""
         today = date.today()
         query = self.db.query(ToDo).filter(
             ToDo.owner_id == owner_id,
             ToDo.due_date == today,
-            ToDo.is_done == False
+            ToDo.is_done == False,
+            ToDo.deleted_at.is_(None)  # ✨ CAP 8: exclude deleted
         ).order_by(ToDo.due_date)
         
         total = query.count()

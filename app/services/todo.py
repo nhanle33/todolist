@@ -93,8 +93,25 @@ class ToDoService:
         return ToDoResponse.from_orm(todo)
 
     def delete_todo(self, todo_id: int, owner_id: int) -> bool:
-        """Delete a todo (must belong to owner)"""
+        """Soft delete a todo (must belong to owner)"""
         return self.repository.delete(todo_id, owner_id)
+
+    def restore_todo(self, todo_id: int, owner_id: int) -> Optional[ToDoResponse]:
+        """Restore a deleted todo"""
+        todo = self.repository.restore(todo_id, owner_id)
+        if not todo:
+            return None
+        return ToDoResponse.from_orm(todo)
+
+    def get_deleted(self, owner_id: int, limit: int = 10, offset: int = 0) -> PaginatedToDoResponse:
+        """Get deleted todos for a user"""
+        todos, total = self.repository.get_deleted(owner_id, limit, offset)
+        return PaginatedToDoResponse(
+            items=[ToDoResponse.from_orm(t) for t in todos],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     def get_overdue(self, owner_id: int, limit: int = 10, offset: int = 0) -> PaginatedToDoResponse:
         """Get overdue todos (due_date < today and not done)"""

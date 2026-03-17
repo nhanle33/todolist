@@ -43,6 +43,7 @@ class ToDo(Base):
     due_date = Column(Date, nullable=True, index=True)  # ✨ NEW: deadline
     created_at = Column(DateTime, default=datetime.now, nullable=False, index=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+    deleted_at = Column(DateTime, nullable=True, index=True)  # ✨ CAP 8: soft delete
     
     # Foreign key
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)

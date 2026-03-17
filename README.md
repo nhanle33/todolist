@@ -1639,8 +1639,300 @@ Before going to production:
 
 ---
 
-## Các cấp độ tiếp theo
-- Cấp 5: Authentication + User (JWT, Password Hash) - ✅ Done
-- Cấp 6: Nâng cao (Tag, Deadline, Smart Filtering) - ✅ Done
-- Cấp 7: Testing + Docker + Documentation - ✅ Done
-- Cấp 8: Advanced features (monitoring, CI/CD, caching)
+---
+
+## Cấp 8 - Advanced Features (Soft Delete) (✅ Hoàn thành)
+
+### Yêu cầu
+- ✅ Soft delete implementation (`deleted_at` field)
+- ✅ Restore deleted todos endpoint
+- ✅ View deleted todos endpoint
+- ✅ Auto-exclude deleted from all queries
+- ✅ Comprehensive test coverage
+
+### Soft Delete Overview
+
+Soft delete là một pattern an toàn để "xóa" dữ liệu mà không mất đi vĩnh viễn:
+
+```
+Hard Delete (Traditional):
+DELETE FROM todos WHERE id = 1  ← Dữ liệu mất hẳn
+
+Soft Delete (Safer):
+UPDATE todos SET deleted_at = NOW() WHERE id = 1  ← Dữ liệu vẫn còn nhưng đánh dấu là deleted
+```
+
+#### Ưu điểm Soft Delete
+- ✅ **Khôi phục được** - Có thể restore todo đã xóa
+- ✅ **Audit trail** - Biết khi nào todo bị xóa
+- ✅ **An toàn hơn** - Tránh mất dữ liệu vô tình
+- ✅ **GDPR compliant** - Cho phép người dùng xóa account nhưng giữ lại records
+- ✅ **Lịch sử** - Có thể xem lịch sử xóa
+
+### Database Changes
+
+#### Updated ToDo Model
+```python
+# app/db/models.py
+class ToDo(Base):
+    __tablename__ = "todos"
+    
+    id = Column(Integer, primary_key=True)
+    title = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    is_done = Column(Boolean, default=False)
+    due_date = Column(Date, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    
+    # ✨ CAP 8: Soft delete field
+    deleted_at = Column(DateTime, nullable=True, index=True)
+    
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    owner = relationship("User", back_populates="todos")
+    tags = relationship("Tag", secondary="todo_tags", back_populates="todos")
+```
+
+### New Repository Methods
+
+```python
+# app/repositories/database.py
+class ToDoRepository:
+    
+    def delete(self, todo_id, owner_id):
+        """Soft delete: set deleted_at = NOW()"""
+        todo.deleted_at = datetime.now()
+        return True
+    
+    def restore(self, todo_id, owner_id):
+        """Restore: set deleted_at = NULL"""
+        todo.deleted_at = None
+        return todo
+    
+    def get_deleted(self, owner_id, limit, offset):
+        """Get all deleted todos (where deleted_at IS NOT NULL)"""
+        return deleted_todos
+```
+
+### Auto-Exclusion Logic
+
+Tất cả queries tự động loại bỏ deleted todos:
+
+```python
+# get_by_id
+query.filter(TodoDo.deleted_at.is_(None))  # ✨ Always exclude deleted
+
+# get_all
+query.filter(ToDo.deleted_at.is_(None))    # ✨ Always exclude deleted
+
+# get_overdue
+query.filter(ToDo.deleted_at.is_(None))    # ✨ Always exclude deleted
+
+# get_today
+query.filter(ToDo.deleted_at.is_(None))    # ✨ Always exclude deleted
+
+# Chỉ get_deleted mới lấy deleted todos (deleted_at IS NOT NULL)
+```
+
+### New Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| DELETE | /api/v1/todos/{id} | ✅ | Soft delete todo |
+| **GET** | **/api/v1/todos/deleted** | ✅ | **List deleted todos** 🆕 |
+| **POST** | **/api/v1/todos/{id}/restore** | ✅ | **Restore deleted todo** 🆕 |
+
+### Usage Examples
+
+**1. Delete todo (soft delete)**
+```bash
+curl -X DELETE http://localhost:8000/api/v1/todos/1 \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response: 204 No Content
+# Database: deleted_at = 2026-03-17T16:30:45.123456
+```
+
+**2. View deleted todos**
+```bash
+curl -X GET "http://localhost:8000/api/v1/todos/deleted?limit=10" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response
+{
+  "items": [
+    {
+      "id": 1,
+      "title": "Deleted task",
+      "description": null,
+      "is_done": false,
+      "due_date": null,
+      "tags": [],
+      "deleted_at": "2026-03-17T16:30:45.123456",  # ✨ Shows when deleted
+      "created_at": "2026-03-17T16:18:47.606191",
+      "updated_at": "2026-03-17T16:30:45.123456"
+    }
+  ],
+  "total": 1,
+  "limit": 10,
+  "offset": 0
+}
+```
+
+**3. Restore deleted todo**
+```bash
+curl -X POST http://localhost:8000/api/v1/todos/1/restore \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response: 200 OK
+{
+  "id": 1,
+  "title": "Deleted task",
+  "is_done": false,
+  "deleted_at": null,  # ✨ No longer deleted
+  "created_at": "2026-03-17T16:18:47.606191",
+  "updated_at": "2026-03-17T16:30:45.123456"
+}
+```
+
+**4. Deleted todos auto-excluded from all queries**
+```bash
+# After deleting todo #1 with title "Deleted task"
+
+# List todos - does NOT include deleted
+curl -X GET http://localhost:8000/api/v1/todos \
+  -H "Authorization: Bearer $TOKEN"
+# Response: { total: 0, items: [] }
+
+# Search - does NOT find deleted  
+curl -X GET "http://localhost:8000/api/v1/todos?q=Deleted" \
+  -H "Authorization: Bearer $TOKEN"
+# Response: { total: 0, items: [] }
+
+# Today endpoint - excludes deleted
+curl -X GET http://localhost:8000/api/v1/todos/today \
+  -H "Authorization: Bearer $TOKEN"
+# Response: { total: 0, items: [] }
+
+# Overdue endpoint - excludes deleted
+curl -X GET http://localhost:8000/api/v1/todos/overdue \
+  -H "Authorization: Bearer $TOKEN"
+# Response: { total: 0, items: [] }
+
+# Only deleted endpoint shows it
+curl -X GET http://localhost:8000/api/v1/todos/deleted \
+  -H "Authorization: Bearer $TOKEN"
+# Response: { total: 1, items: [{ id: 1, title: "Deleted task" }] }
+```
+
+### Test Coverage (15+ new tests)
+
+```yaml
+TestSoftDelete:
+  ✅ Soft delete sets deleted_at
+  ✅ Get deleted todos paginated
+  ✅ Restore deleted todo
+  ✅ Restore non-existent deleted todo (404)
+  ✅ Deleted todos excluded from list
+  ✅ Deleted todos excluded from search
+  ✅ Deleted todos excluded from today
+  ✅ Deleted todos excluded from overdue
+  ✅ User isolation on deleted todos
+  ✅ Pagination on deleted todos
+  ✅ Deleted todo not found in normal list
+  ✅ Restore updates deleted_at to NULL
+```
+
+### Security & Data Integrity
+
+✅ **User Isolation**
+- Users only see/restore their own deleted todos
+- query.filter(ToDo.owner_id == user_id)
+
+✅ **Auditability**
+- `deleted_at` timestamp shows exactly when deleted
+- Combined with `updated_at` shows history
+- Can add deleted_by user_id if needed
+
+✅ **Safety**
+- Soft delete is reversible
+- No accidental permanent data loss
+- Better for GDPR compliance
+
+✅ **Performance**
+- `deleted_at` index for fast queries
+- SELECT ... WHERE deleted_at IS NULL
+- SELECT ... WHERE deleted_at IS NOT NULL
+
+### Architecture
+
+```
+Repository Layer
+├── delete(todo_id, owner_id)
+│   └── todo.deleted_at = datetime.now()
+│
+├── restore(todo_id, owner_id)  # NEW
+│   └── todo.deleted_at = None
+│
+└── get_deleted(owner_id)  # NEW
+    └── .filter(deleted_at IS NOT NULL)
+
+Service Layer
+├── delete_todo()
+├── restore_todo()  # NEW
+└── get_deleted()   # NEW
+
+Router Layer
+├── DELETE /todos/{id}      → soft delete
+├── GET /todos/deleted      → show deleted
+└── POST /todos/{id}/restore → restore
+```
+
+### Migration Path
+
+If you have existing production data:
+
+```sql
+-- Add column (nullable)
+ALTER TABLE todos ADD COLUMN deleted_at DATETIME NULL;
+
+-- BackfillORD existing data (nothing is deleted)
+UPDATE todos SET deleted_at = NULL WHERE 1=1;
+
+-- Add index
+CREATE INDEX idx_todos_deleted_at ON todos(deleted_at);
+```
+
+### Status
+✅ **Cấp 8 Complete**
+- ✅ Soft delete implemented (`deleted_at` field)
+- ✅ Auto-exclude deleted from all queries
+- ✅ Restore endpoint working
+- ✅ Deleted list endpoint working
+- ✅ 15+ tests covering all scenarios
+- ✅ User isolation maintained
+- ✅ Pagination working on deleted todos
+
+### Next Steps (Cấp 9+)
+- Hard delete after 30-day grace period (GDPR)
+- Audit logs with who deleted what when
+- Bulk soft delete/restore operations
+- Scheduled hard delete cleanup job
+- Deletion reason/notes field
+
+**Status:** ✅ Hoàn thành
+
+---
+
+## Các cấp độ được hoàn thành
+- Cấp 0: Hello To-Do - ✅
+- Cấp 1: CRUD cơ bản - ✅
+- Cấp 2: Validation + Filter/Sort/Pagination - ✅
+- Cấp 3: Clean Architecture - ✅
+- Cấp 4: Database + SQLAlchemy - ✅
+- Cấp 5: Authentication + Authorization - ✅
+- Cấp 6: Tags + Deadlines + Smart Filtering - ✅
+- Cấp 7: Testing + Docker + Documentation - ✅
+- Cấp 8: Soft Delete - ✅
+
+**Tổng cộng: 9 Cấp độ hoàn thiện** 🎉

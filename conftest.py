@@ -5,7 +5,7 @@ import os
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from fastapi.testclient import TestClient
+from starlette.testclient import TestClient
 
 from app.db.models import Base
 from app.db.database import get_db
@@ -49,8 +49,8 @@ def client(db_session):
     
     app.dependency_overrides[get_db] = override_get_db
     
-    with TestClient(app) as test_client:
-        yield test_client
+    test_client = TestClient(app)
+    yield test_client
     
     app.dependency_overrides.clear()
 

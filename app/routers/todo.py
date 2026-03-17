@@ -101,6 +101,18 @@ def get_today_todos(
     return service.get_today(current_user.id, limit, offset)
 
 
+@router.get("/deleted", response_model=PaginatedToDoResponse)
+def get_deleted_todos(
+    limit: int = Query(10, ge=1, le=100, description="Items per page"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get deleted todos (soft delete)"""
+    service = ToDoService(db)
+    return service.get_deleted(current_user.id, limit, offset)
+
+
 @router.get("/{todo_id}", response_model=ToDoResponse)
 def get_todo(
     todo_id: int,
@@ -159,13 +171,27 @@ def mark_complete(
     return todo
 
 
+@router.post("/{todo_id}/restore", response_model=ToDoResponse)
+def restore_todo(
+    todo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Restore a soft-deleted todo"""
+    service = ToDoService(db)
+    todo = service.restore_todo(todo_id, current_user.id)
+    if not todo:
+        raise HTTPException(status_code=404, detail=f"Deleted todo with id {todo_id} not found")
+    return todo
+
+
 @router.delete("/{todo_id}", status_code=204)
 def delete_todo(
     todo_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete a todo"""
+    """Soft delete a todo"""
     service = ToDoService(db)
     success = service.delete_todo(todo_id, current_user.id)
     if not success:
