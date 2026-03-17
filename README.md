@@ -499,6 +499,459 @@ requirements.txt                # Dependencies + auth packages
 todos.db                        # SQLite database (auto-created)
 ```
 
+---
+
+## Cấp 6 - Nâng cao (Tags, Deadlines, Smart Filtering) (✅ Hoàn thành)
+
+### Yêu cầu
+- **Tags (nhãn)**: Gán multiple tags cho mỗi todo
+- **Deadlines (hạn chót)**: Mỗi todo có `due_date` (ngày)
+- **Smart Filtering**: Endpoints để filter todos theo deadline
+- **Tag Management**: CRUD endpoints để quản lý tags (tạo, sửa, xóa)
+- **Cascade Delete**: Xóa tag không làm hỏng todos
+
+### Database Models
+
+#### Tag Model
+```python
+# app/db/models.py
+class Tag(Base):
+    __tablename__ = "tags"
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), unique=True, nullable=False, index=True)
+    color = Column(String(7), default="#999999")  # Hex color code
+    created_at = Column(DateTime, default=datetime.now)
+    
+    # Many-to-many relationship with ToDo
+    todos = relationship(
+        "ToDo",
+        secondary="todo_tags",
+        back_populates="tags"
+    )
+```
+
+#### Todo-Tag Association Table
+```python
+# Many-to-many relationship via association table
+todo_tags = Table(
+    'todo_tags',
+    Base.metadata,
+    Column('todo_id', Integer, ForeignKey('todos.id', ondelete='CASCADE'), primary_key=True),
+    Column('tag_id', Integer, ForeignKey('tags.id', ondelete='CASCADE'), primary_key=True)
+)
+```
+
+#### Updated ToDo Model
+```python
+# app/db/models.py
+class ToDo(Base):
+    __tablename__ = "todos"
+    
+    id = Column(Integer, primary_key=True)
+    title = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    is_done = Column(Boolean, default=False)
+    due_date = Column(Date, nullable=True, index=True)  # ✨ NEW
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    owner = relationship("User", back_populates="todos")
+    
+    # ✨ NEW: Many-to-many relationship with Tag
+    tags = relationship(
+        "Tag",
+        secondary="todo_tags",
+        back_populates="todos"
+    )
+```
+
+### Schemas (Pydantic Models)
+
+#### Tag Schemas
+```python
+# app/schemas/tag.py
+class TagCreate(BaseModel):
+    name: str              # Required, 1-50 chars
+    color: str = "#999999" # Optional, defaults to gray
+
+class TagUpdate(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+
+class TagResponse(BaseModel):
+    id: int
+    name: str
+    color: str
+    created_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class PaginatedTagResponse(BaseModel):
+    items: List[TagResponse]
+    total: int
+    limit: int
+    offset: int
+```
+
+#### Updated Todo Schemas with Tags
+```python
+# app/schemas/todo.py
+from datetime import date
+from app.schemas.tag import TagResponse
+
+class ToDoCreate(BaseModel):
+    title: str                          # 1-100 chars
+    description: Optional[str] = None
+    due_date: Optional[date] = None     # ✨ NEW
+    tag_ids: Optional[List[int]] = None # ✨ NEW
+
+class ToDoUpdate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    due_date: Optional[date] = None     # ✨ NEW
+    tag_ids: Optional[List[int]] = None # ✨ NEW
+
+class ToDoPartialUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    is_done: Optional[bool] = None
+    due_date: Optional[date] = None     # ✨ NEW
+    tag_ids: Optional[List[int]] = None # ✨ NEW
+
+class ToDoResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str] = None
+    is_done: bool
+    due_date: Optional[date] = None     # ✨ NEW
+    tags: List[TagResponse] = []        # ✨ NEW
+    created_at: datetime
+    updated_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class PaginatedToDoResponse(BaseModel):
+    items: List[ToDoResponse]
+    total: int
+    limit: int
+    offset: int
+```
+
+### Tag Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | /api/v1/tags | ✅ Bearer token | Create new tag |
+| GET | /api/v1/tags | ✅ Bearer token | List all tags (paginated) |
+| GET | /api/v1/tags/{id} | ✅ Bearer token | Get tag details |
+| PUT | /api/v1/tags/{id} | ✅ Bearer token | Update tag |
+| DELETE | /api/v1/tags/{id} | ✅ Bearer token | Delete tag |
+
+### Todo Endpoints with Filtering
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | /api/v1/todos | ✅ Bearer token | Create todo (with due_date, tag_ids) |
+| GET | /api/v1/todos | ✅ Bearer token | List todos (existing filters + due_date support) |
+| GET | /api/v1/todos/{id} | ✅ Bearer token | Get todo with tags |
+| PUT | /api/v1/todos/{id} | ✅ Bearer token | Update todo (including tags) |
+| PATCH | /api/v1/todos/{id} | ✅ Bearer token | Partial update |
+| POST | /api/v1/todos/{id}/complete | ✅ Bearer token | Mark done |
+| **GET** | **/api/v1/todos/overdue** | ✅ Bearer token | **List overdue todos** 🆕 |
+| **GET** | **/api/v1/todos/today** | ✅ Bearer token | **List today's todos** 🆕 |
+| DELETE | /api/v1/todos/{id} | ✅ Bearer token | Delete todo |
+
+### Usage Examples
+
+**1. Create a tag**
+```bash
+TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."
+
+curl -X POST http://localhost:8000/api/v1/tags \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "work",
+    "color": "#FF5733"
+  }'
+
+# Response
+{
+  "id": 1,
+  "name": "work",
+  "color": "#FF5733",
+  "created_at": "2026-03-17T16:18:36.386981"
+}
+```
+
+**2. List all tags**
+```bash
+curl -X GET "http://localhost:8000/api/v1/tags?limit=100" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response
+{
+  "items": [
+    {
+      "id": 1,
+      "name": "work",
+      "color": "#FF5733",
+      "created_at": "2026-03-17T16:18:36.386981"
+    },
+    {
+      "id": 2,
+      "name": "urgent",
+      "color": "#FF6600",
+      "created_at": "2026-03-17T16:18:41.747864"
+    }
+  ],
+  "total": 2,
+  "limit": 100,
+  "offset": 0
+}
+```
+
+**3. Update tag color**
+```bash
+curl -X PUT http://localhost:8000/api/v1/tags/2 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "color": "#FF0000"
+  }'
+
+# Response
+{
+  "id": 2,
+  "name": "urgent",
+  "color": "#FF0000",
+  "created_at": "2026-03-17T16:18:41.747864"
+}
+```
+
+**4. Create todo with due_date and tags**
+```bash
+TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...."
+
+curl -X POST http://localhost:8000/api/v1/todos \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Finish project",
+    "description": "Complete cap 6",
+    "due_date": "2026-03-17",
+    "tag_ids": [1, 2]
+  }'
+
+# Response
+{
+  "id": 1,
+  "title": "Finish project",
+  "description": "Complete cap 6",
+  "is_done": false,
+  "due_date": "2026-03-17",
+  "tags": [
+    {
+      "id": 1,
+      "name": "work",
+      "color": "#FF5733",
+      "created_at": "2026-03-17T16:18:36.386981"
+    },
+    {
+      "id": 2,
+      "name": "urgent",
+      "color": "#FF0000",
+      "created_at": "2026-03-17T16:18:41.747864"
+    }
+  ],
+  "created_at": "2026-03-17T16:18:47.606191",
+  "updated_at": "2026-03-17T16:18:47.606196"
+}
+```
+
+**5. Get today's todos**
+```bash
+curl -X GET "http://localhost:8000/api/v1/todos/today?limit=10" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response - only incomplete todos with due_date = today
+{
+  "items": [
+    {
+      "id": 1,
+      "title": "Finish project",
+      "description": "Complete cap 6",
+      "is_done": false,
+      "due_date": "2026-03-17",
+      "tags": [
+        {
+          "id": 1,
+          "name": "work",
+          "color": "#FF5733",
+          "created_at": "2026-03-17T16:18:36.386981"
+        },
+        {
+          "id": 2,
+          "name": "urgent",
+          "color": "#FF0000",
+          "created_at": "2026-03-17T16:18:41.747864"
+        }
+      ],
+      "created_at": "2026-03-17T16:18:47.606191",
+      "updated_at": "2026-03-17T16:18:47.606196"
+    }
+  ],
+  "total": 1,
+  "limit": 10,
+  "offset": 0
+}
+```
+
+**6. Get overdue todos**
+```bash
+curl -X GET "http://localhost:8000/api/v1/todos/overdue?limit=10" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response - only incomplete todos with due_date < today
+{
+  "items": [
+    {
+      "id": 2,
+      "title": "Old task",
+      "description": null,
+      "is_done": false,
+      "due_date": "2026-03-10",
+      "tags": [],
+      "created_at": "2026-03-17T16:20:02.031758",
+      "updated_at": "2026-03-17T16:20:02.031762"
+    }
+  ],
+  "total": 1,
+  "limit": 10,
+  "offset": 0
+}
+```
+
+**7. Delete tag**
+```bash
+curl -X DELETE http://localhost:8000/api/v1/tags/2 \
+  -H "Authorization: Bearer $TOKEN"
+
+# Response: 204 No Content
+# Note: Todos referencing deleted tag still exist, tag just removed from todo.tags
+```
+
+### Smart Filtering Features
+
+#### By Due Date
+```bash
+# Get today's incomplete todos
+GET /api/v1/todos/today
+
+# Get overdue (past due) incomplete todos
+GET /api/v1/todos/overdue
+
+# Both support pagination
+GET /api/v1/todos/today?limit=5&offset=10
+GET /api/v1/todos/overdue?limit=5&offset=0
+```
+
+#### By Tag (existing filter still works)
+```bash
+# List all user's todos
+GET /api/v1/todos
+
+# With status filter
+GET /api/v1/todos?is_done=false
+
+# With search
+GET /api/v1/todos?q=project
+
+# Combined
+GET /api/v1/todos?is_done=false&q=urgent&sort=-created_at
+```
+
+### Architecture Updates
+
+```
+Repository Layer (app/repositories/)
+├── user.py: UserRepository (unchanged)
+├── database.py: ToDoRepository
+│   ├── create(owner_id, data)  # Now accepts due_date, tag_ids
+│   ├── update(todo_id, owner_id, data)  # Supports tag_ids
+│   ├── get_overdue(owner_id, limit, offset)  # NEW
+│   └── get_today(owner_id, limit, offset)  # NEW
+└── tag.py: TagRepository  # NEW
+    ├── create(name, color)
+    ├── get_by_id(tag_id)
+    ├── get_by_name(name)
+    ├── get_all(limit, offset)
+    ├── update(tag_id, name, color)
+    └── delete(tag_id)
+
+Service Layer (app/services/)
+├── todo.py: ToDoService
+│   ├── create_todo(owner_id, ToDoCreate)  # Handles tags
+│   ├── update_todo(todo_id, owner_id, ToDoUpdate)  # Handles tags
+│   ├── partial_update_todo(...)  # Handles tags
+│   ├── get_overdue(owner_id, limit, offset)  # NEW
+│   └── get_today(owner_id, limit, offset)  # NEW
+└── tag.py: TagService  # NEW
+    ├── create_tag(TagCreate)
+    ├── get_tag(tag_id)
+    ├── list_tags(limit, offset)
+    ├── update_tag(tag_id, TagUpdate)
+    └── delete_tag(tag_id)
+    
+Data Model Schema
+├── todo_tags association table (links todos ↔ tags)
+├── Tag model with unique name, color hex support
+└── ToDo.due_date field (Date type, nullable, indexed)
+```
+
+### Key Features
+
+✅ **Many-to-Many Relationships**
+- SQLAlchemy association table `todo_tags`
+- Todos can have multiple tags
+- Tags can be assigned to multiple todos
+- Cascade delete on both sides
+
+✅ **Date-based Filtering**
+- `/api/v1/todos/today` - Incomplete todos due today
+- `/api/v1/todos/overdue` - Incomplete todos past their due date
+- Both return paginated responses
+- Both respect user isolation (owner_id filtering)
+
+✅ **Smart Tag Color**
+- Hex color codes (#RRGGBB format)
+- Default to #999999 (gray) if not specified
+- Useful for UI categorization
+
+✅ **Tag Management**
+- Create, read, update, delete tags
+- Global tags (any user can see all tags)
+- Update tag properties without affecting todos
+- Delete tag safely (cascade handles cleanup)
+
+✅ **Complete User Isolation**
+- Todos remain filtered by owner_id
+- Users can only see/filter their own todos
+- Tag creation is global, but filtering is per-user
+- All endpoints require authentication
+
+### Status
+✅ **Cấp 6 Implementation Complete + Tested**
+- ✅ Tag CRUD endpoints working
+- ✅ Todo creation with tags tested
+- ✅ Today's todos filtering tested
+- ✅ Overdue todos filtering tested
+- ✅ Tag management tested (update, list)
+- ✅ Many-to-many relationship verified
+- ✅ User isolation maintained
+
 ### Dependencies Added
 
 ```

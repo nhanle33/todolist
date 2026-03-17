@@ -16,7 +16,9 @@ class ToDoService:
             owner_id=owner_id,
             title=todo_create.title,
             description=todo_create.description,
-            is_done=todo_create.is_done
+            is_done=todo_create.is_done,
+            due_date=todo_create.due_date,  # ✨ NEW
+            tag_ids=todo_create.tag_ids,  # ✨ NEW
         )
         return ToDoResponse.from_orm(todo)
 
@@ -61,6 +63,8 @@ class ToDoService:
             title=todo_update.title,
             description=todo_update.description,
             is_done=todo_update.is_done,
+            due_date=todo_update.due_date,  # ✨ NEW
+            tag_ids=todo_update.tag_ids,  # ✨ NEW
         )
         if not todo:
             return None
@@ -74,6 +78,8 @@ class ToDoService:
             title=todo_update.title,
             description=todo_update.description,
             is_done=todo_update.is_done,
+            due_date=todo_update.due_date,  # ✨ NEW
+            tag_ids=todo_update.tag_ids,  # ✨ NEW
         )
         if not todo:
             return None
@@ -89,3 +95,23 @@ class ToDoService:
     def delete_todo(self, todo_id: int, owner_id: int) -> bool:
         """Delete a todo (must belong to owner)"""
         return self.repository.delete(todo_id, owner_id)
+
+    def get_overdue(self, owner_id: int, limit: int = 10, offset: int = 0) -> PaginatedToDoResponse:
+        """Get overdue todos (due_date < today and not done)"""
+        todos, total = self.repository.get_overdue(owner_id, limit, offset)
+        return PaginatedToDoResponse(
+            items=[ToDoResponse.from_orm(t) for t in todos],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_today(self, owner_id: int, limit: int = 10, offset: int = 0) -> PaginatedToDoResponse:
+        """Get today's todos (due_date = today and not done)"""
+        todos, total = self.repository.get_today(owner_id, limit, offset)
+        return PaginatedToDoResponse(
+            items=[ToDoResponse.from_orm(t) for t in todos],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )

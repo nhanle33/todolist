@@ -77,6 +77,30 @@ def list_todos(
     )
 
 
+@router.get("/overdue", response_model=PaginatedToDoResponse)
+def get_overdue_todos(
+    limit: int = Query(10, ge=1, le=100, description="Items per page"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get overdue todos (due_date < today and not done)"""
+    service = ToDoService(db)
+    return service.get_overdue(current_user.id, limit, offset)
+
+
+@router.get("/today", response_model=PaginatedToDoResponse)
+def get_today_todos(
+    limit: int = Query(10, ge=1, le=100, description="Items per page"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get today's todos (due_date = today and not done)"""
+    service = ToDoService(db)
+    return service.get_today(current_user.id, limit, offset)
+
+
 @router.get("/{todo_id}", response_model=ToDoResponse)
 def get_todo(
     todo_id: int,

@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.core import settings
 from app.routers import todo_router
 from app.routers.auth import router as auth_router
+from app.routers.tag import router as tag_router
 from app.db import Base, engine
 
 # Create tables
@@ -22,6 +23,7 @@ app = FastAPI(
 # Include routers
 app.include_router(auth_router, prefix=settings.API_PREFIX)
 app.include_router(todo_router, prefix=settings.API_PREFIX)
+app.include_router(tag_router, prefix=settings.API_PREFIX)
 
 
 @app.get("/")

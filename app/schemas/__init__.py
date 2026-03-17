@@ -12,6 +12,11 @@ from app.schemas.user import (
     TokenResponse,
     CurrentUser,
 )
+from app.schemas.tag import (
+    TagCreate,
+    TagUpdate,
+    TagResponse,
+)
 
 __all__ = [
     "ToDoCreate",
@@ -24,4 +29,7 @@ __all__ = [
     "UserResponse",
     "TokenResponse",
     "CurrentUser",
+    "TagCreate",
+    "TagUpdate",
+    "TagResponse",
 ]
